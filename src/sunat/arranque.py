@@ -113,8 +113,24 @@ def _instalar_chromium() -> None:
     print()
 
 
+def _quiere_bandeja() -> bool:
+    """Si hay que intentar el ícono de bandeja en vez de la consola pelada.
+
+    Dos formas de desactivarlo: la variable de entorno, para quien prefiera
+    la consola de siempre, y la ausencia de `pystray` — que en un venv de
+    desarrollo puede no estar instalado sin que eso deba impedir arrancar.
+    """
+    if os.environ.get("SUNAT_SIN_BANDEJA", "").strip().lower() in ("1", "true"):
+        return False
+    try:
+        import pystray  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def main(puerto: int | None = None) -> int:
-    from .agente import PUERTO_POR_DEFECTO, iniciar
+    from .agente import PUERTO_POR_DEFECTO, crear_servidor, iniciar, preparar
 
     cfg = cargar_config()
     configurar(cfg)
@@ -123,4 +139,14 @@ def main(puerto: int | None = None) -> int:
         _log.info("Chromium no está instalado; se descarga antes de arrancar.")
         _instalar_chromium()
 
-    return iniciar(cfg, puerto=puerto or PUERTO_POR_DEFECTO)
+    puerto = puerto or PUERTO_POR_DEFECTO
+
+    if not _quiere_bandeja():
+        return iniciar(cfg, puerto=puerto)
+
+    from . import bandeja
+
+    cfg = preparar(cfg)
+    servidor = crear_servidor(cfg, puerto)
+    bandeja.ejecutar(cfg, servidor)
+    return 0

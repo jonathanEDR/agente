@@ -27,12 +27,11 @@ import queue
 import secrets
 import time
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import plataformas, vinculacion
@@ -449,30 +448,16 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    # --- el panel -----------------------------------------------------------
-
-    dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    # --- pagina informativa ---------------------------------------------------
+    #
+    # El agente ya no sirve el panel: eso vive en un repo aparte (React,
+    # desplegado en Vercel o corriendo en :5173 en desarrollo). Esta ruta
+    # es solo para quien llegue a http://127.0.0.1:<puerto> a mano —el
+    # ícono de bandeja no la usa, abre directo la URL del panel real.
 
     @app.get("/")
-    def panel():
-        """Sirve el panel con el token ya inyectado.
-
-        Servirlo desde el mismo origen que la API evita de raíz el bloqueo
-        por contenido mixto y no necesita CORS.
-        """
-        index = dist / "index.html"
-        if not index.exists():
-            return HTMLResponse(_pagina_sin_build(), status_code=200)
-        html = index.read_text(encoding="utf-8").replace("__TOKEN_AGENTE__", token)
-        return HTMLResponse(html)
-
-    @app.get("/assets/{archivo:path}")
-    def assets(archivo: str):
-        ruta = (dist / "assets" / archivo).resolve()
-        # Sin esta comprobación, "../.." serviría cualquier archivo del disco.
-        if not str(ruta).startswith(str((dist / "assets").resolve())) or not ruta.is_file():
-            raise HTTPException(404, "No encontrado")
-        return FileResponse(ruta)
+    def raiz():
+        return HTMLResponse(_pagina_agente_corriendo())
 
     return app
 
@@ -481,18 +466,15 @@ def _json_error(codigo: int, mensaje: str) -> JSONResponse:
     return JSONResponse(status_code=codigo, content={"error": mensaje})
 
 
-def _pagina_sin_build() -> str:
+def _pagina_agente_corriendo() -> str:
     return (
         "<!doctype html><meta charset='utf-8'>"
         "<title>Agente SUNAT SOL</title>"
         "<body style=\"font-family:system-ui;max-width:40rem;margin:4rem auto;"
         "line-height:1.6;color:#141e2c\">"
         "<h1>El agente está corriendo</h1>"
-        "<p>Pero el panel todavía no está compilado. Desde la carpeta "
-        "<code>web/</code>:</p>"
-        "<pre style=\"background:#eef2f7;padding:1rem;border-radius:8px\">"
-        "npm install\nnpm run build</pre>"
-        "<p>Luego recarga esta página.</p></body>"
+        "<p>Esta ventana no es el panel. Ábrelo desde el ícono en la bandeja "
+        "del sistema, o entra directo a la URL de tu panel.</p></body>"
     )
 
 
@@ -524,9 +506,15 @@ def obtener_token(cfg: Config) -> str:
 # --- arranque ---------------------------------------------------------------
 
 
-def iniciar(cfg: Config | None = None, puerto: int = PUERTO_POR_DEFECTO) -> int:
-    import uvicorn
+def preparar(cfg: Config | None = None) -> Config:
+    """Deja la config lista para arrancar, sin todavía escuchar en ningún
+    puerto.
 
+    Separado de `iniciar()` porque el modo bandeja necesita este mismo
+    trabajo —forzar navegador visible, configurar logging, limpiar perfiles
+    viejos— antes de construir el servidor, pero no quiere el resto de
+    `iniciar()` (que bloquea imprimiendo a consola).
+    """
     cfg = cfg or cargar_config()
     # El agente siempre abre navegador visible: el sentido es que navegues tú.
     cfg = replace(cfg, headless=False)
@@ -535,8 +523,33 @@ def iniciar(cfg: Config | None = None, puerto: int = PUERTO_POR_DEFECTO) -> int:
     if (viejos := limpiar_perfiles_viejos(cfg)):
         _log.info("Limpiados perfiles del esquema anterior: %s", ", ".join(viejos))
 
+    return cfg
+
+
+def crear_servidor(cfg: Config, puerto: int = PUERTO_POR_DEFECTO) -> "uvicorn.Server":
+    """El servidor ya armado, sin arrancar todavía.
+
+    Se expone como `uvicorn.Server` y no con `uvicorn.run()` porque el modo
+    bandeja necesita un handle para apagarlo desde otro hilo —el del ícono—
+    poniendo `servidor.should_exit = True`. `uvicorn.run()` no da eso: corre
+    y bloquea hasta Ctrl+C, sin forma de pedirle que pare desde afuera.
+    """
+    import uvicorn
+
     token = obtener_token(cfg)
     app = crear_app(cfg, token, puerto)
+    configuracion = uvicorn.Config(app, host=HOST, port=puerto, log_level="warning")
+    return uvicorn.Server(configuracion)
+
+
+def iniciar(cfg: Config | None = None, puerto: int = PUERTO_POR_DEFECTO) -> int:
+    """Modo consola: arranca y bloquea hasta Ctrl+C.
+
+    Es el modo de siempre, y sigue siendo el que usa `arranque.py` cuando la
+    bandeja no está disponible (falta `pystray`, o `SUNAT_SIN_BANDEJA=1`).
+    """
+    cfg = preparar(cfg)
+    servidor = crear_servidor(cfg, puerto)
 
     print()
     print(f"  Panel:      http://{HOST}:{puerto}")
@@ -544,5 +557,5 @@ def iniciar(cfg: Config | None = None, puerto: int = PUERTO_POR_DEFECTO) -> int:
     print("  Ctrl+C para detener.")
     print()
 
-    uvicorn.run(app, host=HOST, port=puerto, log_level="warning")
+    servidor.run()
     return 0

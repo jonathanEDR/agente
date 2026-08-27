@@ -175,6 +175,13 @@ class Config:
         default_factory=lambda: _env_str("SUNAT_PANEL_ORIGENES", "")
     )
 
+    # A dónde abre "Abrir panel" en el ícono de la bandeja. El agente ya no
+    # sirve el panel él mismo —vive en un repo aparte, en la nube o en
+    # :5173 en desarrollo— así que tiene que saber la URL por fuera.
+    panel_url: str = field(
+        default_factory=lambda: _env_str("SUNAT_PANEL_URL", "http://127.0.0.1:5173")
+    )
+
     host_login: str = HOST_LOGIN
     host_menu: str = HOST_MENU
     user_agent: str = field(

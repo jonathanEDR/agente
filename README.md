@@ -25,7 +25,7 @@ playwright install chromium   # una sola vez; se cachea por usuario
 python -m sunat
 ```
 
-Queda escuchando en `http://127.0.0.1:17817`. Corre `pytest` para las 128
+Queda escuchando en `http://127.0.0.1:17817`. Corre `pytest` para las 133
 pruebas (ninguna toca la red ni SUNAT).
 
 ### Si solo vas a usarlo (sin tocar código)
@@ -110,7 +110,8 @@ dispositivo).
 src/sunat/
 ├─ __main__.py        punto de entrada: python -m sunat
 ├─ arranque.py         primer arranque: fija PLAYWRIGHT_BROWSERS_PATH,
-│                       descarga Chromium si falta, delega a agente.iniciar()
+│                       descarga Chromium si falta, elige bandeja o consola
+├─ bandeja.py           ícono en la bandeja: "Abrir panel" / "Ver registro" / "Salir"
 ├─ agente.py            la API FastAPI que consume el panel
 ├─ vinculacion.py       token de esta computadora: guardar, leer, validar destino
 ├─ config.py            rutas, orígenes del panel, todo por variable de entorno
@@ -128,7 +129,7 @@ packaging/
 ├─ build.py             compila el .exe (ver Guía rápida)
 ├─ lanzador.py           entrypoint que usa PyInstaller
 └─ diagnostico_chromium.py  prueba aislada: ¿arranca Chromium dentro del .exe?
-tests/                 128 pruebas, ninguna toca la red
+tests/                 133 pruebas, ninguna toca la red
 ```
 
 ## El instalador de un clic
@@ -137,10 +138,30 @@ Nadie fuera de este repo debería ver `pip install` ni una terminal. Lo que
 se distribuye es un `.exe` autocontenido — ver «Guía rápida» arriba para
 compilarlo, y «Cómo se distribuye» para publicarlo.
 
-Se deja la consola visible a propósito: si algo falla, ahí se ve el error.
-Una versión sin consola es más prolija, pero si falla no muestra nada —
-para eso hace falta antes tener logs y manejo de errores más maduros de los
-que hay hoy.
+### Bandeja del sistema, no consola
+
+Al abrir el `.exe`, la consola aparece un instante y se oculta sola: lo que
+queda es un ícono junto al reloj, con **Abrir panel**, **Ver registro** y
+**Salir** — el mismo patrón que Dropbox o Zoom, sin nada que un usuario sin
+conocimientos de código tenga que interpretar.
+
+"Abrir panel" no apunta al propio agente —ya no sirve ningún HTML, ver
+«Protocolo con el panel» arriba— sino a `SUNAT_PANEL_URL`
+(`http://127.0.0.1:5173` por defecto en desarrollo; en producción, la URL
+real del panel desplegado).
+
+**La consola no desaparece, se oculta.** [`bandeja.py`](src/sunat/bandeja.py)
+la esconde recién después de que el servidor arrancó en su propio hilo —si
+algo falla antes de eso, todavía se ve el error—, y "Ver registro" en el
+menú abre el archivo de log por si hace falta mirar algo después. Ocultar
+y mostrar la ventana de consola son llamadas directas a `user32.dll`
+(`ShowWindow`), no algo que dependa de si `.exe` se compiló con `--console`
+u oculto: por eso `packaging/build.py` sigue usando `--console` sin que el
+usuario final vea una ventana negra en el uso normal.
+
+Para quien prefiera la consola de siempre —depurando, o si algo con la
+bandeja no funciona en su máquina— `SUNAT_SIN_BANDEJA=1` la desactiva y
+vuelve al modo anterior tal cual.
 
 ### Qué resolvió `packaging/build.py` que no era obvio
 
@@ -206,7 +227,9 @@ reconoce, ni hacia un backend por HTTP plano fuera de localhost.
 
 Nada de esto hace falta para el caso normal — el panel vincula el agente
 al primer uso. `.env.example` lista lo ajustable: orígenes del panel en
-producción (`SUNAT_PANEL_ORIGENES`), modo headless, nivel de log, y el
-modo anterior de una sola llave compartida (`SUNAT_API_URL` /
-`SUNAT_API_KEY`), que la vinculación por panel reemplaza pero no rompe si
-ya lo tenías configurado así.
+producción (`SUNAT_PANEL_ORIGENES`), a dónde abre "Abrir panel" en la
+bandeja (`SUNAT_PANEL_URL`), desactivar la bandeja y volver a consola
+(`SUNAT_SIN_BANDEJA`), modo headless, nivel de log, y el modo anterior de
+una sola llave compartida (`SUNAT_API_URL` / `SUNAT_API_KEY`), que la
+vinculación por panel reemplaza pero no rompe si ya lo tenías configurado
+así.
