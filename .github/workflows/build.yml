@@ -1,0 +1,75 @@
+name: Compilar y publicar
+
+# Un tag v* (ej. v1.0.0) dispara la compilacion y publica un Release.
+# workflow_dispatch permite probar el pipeline sin crear un tag todavia.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version para el nombre del release (ej. v0.0.0-prueba)"
+        required: true
+        default: "v0.0.0-manual"
+
+permissions:
+  contents: write # crear el Release y subirle el .zip
+
+jobs:
+  build:
+    # windows-latest y no algo mas barato: PyInstaller produce un .exe
+    # solo compilando EN Windows, no hay cross-compile real desde Linux.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Compilar el .exe
+        run: python packaging/build.py
+
+      - name: Empaquetar en zip
+        working-directory: dist
+        run: Compress-Archive -Path sunat-agente -DestinationPath sunat-agente-windows.zip
+
+      # --- firma de codigo -----------------------------------------------
+      #
+      # Pendiente a proposito: falta elegir e implementar Azure Trusted
+      # Signing (recomendado) o un certificado EV, y ninguno de los dos se
+      # configura sin la verificacion de identidad que solo el dueño del
+      # proyecto puede completar. Sin firmar, Windows SmartScreen muestra
+      # "Editor desconocido" en el primer uso — no bloquea la instalacion.
+      #
+      # Cuando este listo, un paso aca (antes de "Empaquetar en zip") con
+      # la Action oficial `azure/trusted-signing-action` firma el .exe
+      # dentro del propio pipeline, sin token USB.
+
+      - name: Determinar el nombre del release
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "nombre=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "nombre=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publicar el Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${{ steps.version.outputs.nombre }}" \
+            dist/sunat-agente-windows.zip \
+            --title "Agente ${{ steps.version.outputs.nombre }}" \
+            --notes "Compilado automaticamente desde ${{ github.sha }}. Descarga sunat-agente-windows.zip, descomprime y ejecuta sunat-agente.exe." \
+            --latest
