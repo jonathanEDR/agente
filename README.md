@@ -25,7 +25,7 @@ playwright install chromium   # una sola vez; se cachea por usuario
 python -m sunat
 ```
 
-Queda escuchando en `http://127.0.0.1:17817`. Corre `pytest` para las 135
+Queda escuchando en `http://127.0.0.1:17817`. Corre `pytest` para las 141
 pruebas (ninguna toca la red ni SUNAT).
 
 ### Si solo vas a usarlo (sin tocar código)
@@ -85,6 +85,30 @@ sin tocar otras computadoras del mismo usuario. `validar_api_url()` en
 backend por HTTP plano fuera de `localhost` — sin eso, una página del
 origen permitido podría redirigir el token a un servidor propio.
 
+## Descargas dentro de SUNAT
+
+Un archivo que bajas del Buzón (una constancia, un adjunto) tiene que
+terminar en la carpeta de Descargas de siempre —`SUNAT_DESCARGAS_DIR`, por
+defecto `%USERPROFILE%\Downloads`— con su nombre real, no con uno inventado.
+
+**Sin ayuda, Playwright no hace eso.** Guarda cada descarga con un GUID por
+nombre en una carpeta temporal propia, documentado así: *"the downloads
+are deleted when the browser context they were created in is closed"*.
+Chrome la muestra como "Hecho" en su propio historial —el archivo sí bajó—
+pero desaparece al cerrar la ventana, y nunca tuvo el nombre que uno
+esperaba. `_registrar_descargas()` en [`browser.py`](src/sunat/browser.py)
+copia cada descarga a `SUNAT_DESCARGAS_DIR` con
+`download.suggested_filename` apenas termina, antes de que el cierre del
+contexto la borre.
+
+Dos descargas de la misma sesión pueden sugerir el mismo nombre —dos
+notificaciones distintas de SUNAT, por ejemplo—, y ahí se vale la pena leer
+el comentario de `_elegir_ruta()`: comprobar solo si el archivo ya existe
+en disco no alcanza, porque los handlers de descarga de Playwright pueden
+intercalarse (uno queda esperando dentro de `save_as()` mientras el otro ya
+arrancó), y la segunda descarga pisaba a la primera antes de que el nombre
+se reservara en memoria por adelantado.
+
 ## Rutas de la API
 
 ```
@@ -130,7 +154,7 @@ packaging/
 ├─ build.py             compila el .exe (ver Guía rápida)
 ├─ lanzador.py           entrypoint que usa PyInstaller
 └─ diagnostico_chromium.py  prueba aislada: ¿arranca Chromium dentro del .exe?
-tests/                 135 pruebas, ninguna toca la red
+tests/                 141 pruebas, ninguna toca la red
 ```
 
 ## El instalador de un clic

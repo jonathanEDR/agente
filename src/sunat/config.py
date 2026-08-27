@@ -193,6 +193,15 @@ class Config:
         default_factory=lambda: _env_str("SUNAT_USER_AGENT", USER_AGENT)
     )
 
+    # A dónde van los archivos que se descargan dentro de SUNAT (buzón,
+    # constancias, etc.). La carpeta de Descargas de siempre, no la del
+    # proyecto: es el lugar donde el usuario ya sabe buscar.
+    descargas_dir: Path = field(
+        default_factory=lambda: Path(
+            _env_str("SUNAT_DESCARGAS_DIR", str(Path.home() / "Downloads"))
+        )
+    )
+
     @property
     def vault_file(self) -> Path:
         return self.data_dir / "vault.json"
