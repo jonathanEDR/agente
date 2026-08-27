@@ -194,6 +194,16 @@ def test_el_panel_puede_leer_la_respuesta(cliente):
     assert r.headers.get("access-control-allow-origin") == ORIGEN_PANEL
 
 
+def test_el_panel_de_produccion_esta_permitido_por_defecto(cliente):
+    # El .exe se distribuye a usuarios sin conocimientos tecnicos: no van a
+    # configurar SUNAT_PANEL_ORIGENES a mano. El dominio real tiene que
+    # funcionar sin que nadie toque una variable de entorno.
+    origen_produccion = "https://conta-beta-puce.vercel.app"
+    r = cliente.get("/api/handshake", headers={"Origin": origen_produccion})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == origen_produccion
+
+
 def test_el_preflight_del_panel_pasa(cliente):
     # El preflight va sin token: si lo contestara la guarda de procedencia
     # en vez de CORS, ninguna llamada del panel llegaría al agente.

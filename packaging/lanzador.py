@@ -7,7 +7,7 @@ le complica ese analisis. Este wrapper es el unico proposito de este
 archivo.
 """
 
-from sunat.__main__ import main
+from sunat.__main__ import _con_red_de_seguridad
 import sys
 
-sys.exit(main())
+sys.exit(_con_red_de_seguridad())

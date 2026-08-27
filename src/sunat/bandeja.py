@@ -1,20 +1,25 @@
 """Ícono en la bandeja del sistema.
 
-Reemplaza la consola como interfaz por defecto del `.exe` empaquetado: en
-vez de una ventana negra que hay que dejar abierta, un ícono junto al
-reloj con "Abrir panel" y "Salir" — el mismo patrón que ya conoce cualquier
-usuario de Windows por Dropbox o Zoom.
+Es la única interfaz del `.exe` empaquetado: "Abrir panel" y "Salir",
+junto al reloj — el mismo patrón que ya conoce cualquier usuario de
+Windows por Dropbox o Zoom. No hay ventana de consola que gestionar: el
+`.exe` se compila `--windowed` (ver `packaging/build.py`), así que
+simplemente nunca existe una que ocultar.
 
-La consola no desaparece, se oculta. Si algo falla ANTES de que el ícono
-llegue a mostrarse, la consola sigue ahí para verlo: ocultarla recién
-cuando el ícono ya está listo es lo que preserva la regla de siempre —"si
-falla, se ve el error"— sin obligar a mirar una ventana negra en el uso
-normal.
+Esa decisión reemplazó un primer intento que ocultaba la consola con
+`GetConsoleWindow` + `ShowWindow` después de que el ícono arrancaba. No
+funcionaba en Windows 11: el host de consola por defecto ahí es Windows
+Terminal, que envuelve la consola real vía ConPTY — la ventana que ve el
+usuario no es la misma que esa API alcanza a tocar, así que "ocultarla"
+no hacía nada visible. Mejor no crear ninguna que perseguir ese caso.
+
+Consecuencia: un fallo antes de que este módulo llegue a correr no tiene
+consola donde mostrarse. Lo cubre `avisos.py` con un diálogo nativo, desde
+`__main__._con_red_de_seguridad()`.
 """
 
 from __future__ import annotations
 
-import ctypes
 import os
 import threading
 import webbrowser
@@ -46,27 +51,6 @@ def _icono() -> Image.Image:
     return img
 
 
-def _ventana_consola() -> int | None:
-    """El HWND de la ventana de consola de este proceso, o None si no hay
-    ninguna (por ejemplo, corriendo `pytest` o un build sin consola)."""
-    if os.name != "nt":
-        return None
-    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-    return hwnd or None
-
-
-def ocultar_consola() -> None:
-    hwnd = _ventana_consola()
-    if hwnd:
-        ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
-
-
-def mostrar_consola() -> None:
-    hwnd = _ventana_consola()
-    if hwnd:
-        ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
-
-
 def _abrir_registro(cfg: Config) -> None:
     ruta = cfg.logs_dir / "sunat.log"
     try:
@@ -87,10 +71,6 @@ def ejecutar(cfg: Config, servidor: "uvicorn.Server") -> None:
     hilo_servidor = threading.Thread(target=servidor.run, daemon=True)
     hilo_servidor.start()
 
-    # Recién ahora: si `crear_servidor()` o el hilo fallan al arrancar, el
-    # error todavía se ve en la consola.
-    ocultar_consola()
-
     def salir(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         servidor.should_exit = True
         icon.stop()
@@ -102,7 +82,6 @@ def ejecutar(cfg: Config, servidor: "uvicorn.Server") -> None:
             default=True,
         ),
         pystray.MenuItem("Ver registro", lambda: _abrir_registro(cfg)),
-        pystray.MenuItem("Ver consola", lambda: mostrar_consola()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Salir", salir),
     )

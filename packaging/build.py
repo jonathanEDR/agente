@@ -18,6 +18,16 @@ Por qué --collect-all para fastapi y uvicorn: los dos cargan módulos por
 nombre en tiempo de ejecución (rutas, workers), y el análisis estático de
 PyInstaller no los detecta solo. Sin esto, el .exe arranca y falla recién
 al primer request con un ModuleNotFoundError que no dice cuál falta.
+
+Por qué --windowed y no --console: un `.exe` --console SIEMPRE muestra una
+ventana de terminal al abrirse, y en Windows 11 el host de esa ventana es
+Windows Terminal por defecto — que no responde al truco clásico de
+`GetConsoleWindow`+`ShowWindow` para ocultarla (ConPTY hace que la ventana
+visible no sea la misma que esa API ve). La única forma confiable de no
+mostrar ninguna terminal es no crear una: --windowed arranca sin
+subsistema de consola. La contrapartida —nada que ver si algo falla antes
+de que el ícono de bandeja aparezca— la cubre `avisos.py` con un diálogo
+nativo de Windows.
 """
 
 from __future__ import annotations
@@ -49,7 +59,7 @@ def main() -> int:
         "--name",
         "sunat-agente",
         "--onedir",
-        "--console",
+        "--windowed",
         "--paths",
         str(RAIZ / "src"),
         "--add-data",

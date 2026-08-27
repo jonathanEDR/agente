@@ -2,17 +2,14 @@
 
 No abre un ícono real ni un navegador: eso es integración con el sistema
 operativo y no tiene sentido automatizarlo. Lo que se prueba es la lógica
-que rodea eso — que el ícono se pueda dibujar, que ocultar/mostrar la
-consola no reviente cuando no hay consola (el caso normal bajo pytest), y
-que `agente.crear_servidor()` arme el mismo `FastAPI` que ya usan el resto
-de los tests.
+que rodea eso — que el ícono se pueda dibujar, y que
+`agente.crear_servidor()` arme el mismo `FastAPI` que ya usan el resto de
+los tests.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
-
-import pytest
 
 from sunat import bandeja
 from sunat.agente import crear_servidor
@@ -23,13 +20,6 @@ def test_el_icono_es_una_imagen_valida():
     img = bandeja._icono()
     assert img.size == (64, 64)
     assert img.mode == "RGBA"
-
-
-def test_ocultar_consola_no_revienta_sin_consola():
-    # Bajo pytest normalmente no hay consola propia (GetConsoleWindow
-    # devuelve 0), que es justo el caso que este código tiene que tolerar.
-    bandeja.ocultar_consola()
-    bandeja.mostrar_consola()
 
 
 def test_crear_servidor_arma_el_mismo_app(tmp_path):

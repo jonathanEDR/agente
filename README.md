@@ -25,7 +25,7 @@ playwright install chromium   # una sola vez; se cachea por usuario
 python -m sunat
 ```
 
-Queda escuchando en `http://127.0.0.1:17817`. Corre `pytest` para las 133
+Queda escuchando en `http://127.0.0.1:17817`. Corre `pytest` para las 135
 pruebas (ninguna toca la red ni SUNAT).
 
 ### Si solo vas a usarlo (sin tocar código)
@@ -112,6 +112,7 @@ src/sunat/
 ├─ arranque.py         primer arranque: fija PLAYWRIGHT_BROWSERS_PATH,
 │                       descarga Chromium si falta, elige bandeja o consola
 ├─ bandeja.py           ícono en la bandeja: "Abrir panel" / "Ver registro" / "Salir"
+├─ avisos.py             diálogos nativos de Windows, para cuando no hay consola
 ├─ agente.py            la API FastAPI que consume el panel
 ├─ vinculacion.py       token de esta computadora: guardar, leer, validar destino
 ├─ config.py            rutas, orígenes del panel, todo por variable de entorno
@@ -129,7 +130,7 @@ packaging/
 ├─ build.py             compila el .exe (ver Guía rápida)
 ├─ lanzador.py           entrypoint que usa PyInstaller
 └─ diagnostico_chromium.py  prueba aislada: ¿arranca Chromium dentro del .exe?
-tests/                 133 pruebas, ninguna toca la red
+tests/                 135 pruebas, ninguna toca la red
 ```
 
 ## El instalador de un clic
@@ -138,30 +139,38 @@ Nadie fuera de este repo debería ver `pip install` ni una terminal. Lo que
 se distribuye es un `.exe` autocontenido — ver «Guía rápida» arriba para
 compilarlo, y «Cómo se distribuye» para publicarlo.
 
-### Bandeja del sistema, no consola
+### Bandeja del sistema, sin consola
 
-Al abrir el `.exe`, la consola aparece un instante y se oculta sola: lo que
-queda es un ícono junto al reloj, con **Abrir panel**, **Ver registro** y
-**Salir** — el mismo patrón que Dropbox o Zoom, sin nada que un usuario sin
-conocimientos de código tenga que interpretar.
+Al abrir el `.exe` no aparece ninguna ventana: queda un ícono junto al
+reloj, con **Abrir panel**, **Ver registro** y **Salir** — el mismo patrón
+que Dropbox o Zoom, sin nada que un usuario sin conocimientos de código
+tenga que interpretar.
 
 "Abrir panel" no apunta al propio agente —ya no sirve ningún HTML, ver
 «Protocolo con el panel» arriba— sino a `SUNAT_PANEL_URL`
 (`http://127.0.0.1:5173` por defecto en desarrollo; en producción, la URL
 real del panel desplegado).
 
-**La consola no desaparece, se oculta.** [`bandeja.py`](src/sunat/bandeja.py)
-la esconde recién después de que el servidor arrancó en su propio hilo —si
-algo falla antes de eso, todavía se ve el error—, y "Ver registro" en el
-menú abre el archivo de log por si hace falta mirar algo después. Ocultar
-y mostrar la ventana de consola son llamadas directas a `user32.dll`
-(`ShowWindow`), no algo que dependa de si `.exe` se compiló con `--console`
-u oculto: por eso `packaging/build.py` sigue usando `--console` sin que el
-usuario final vea una ventana negra en el uso normal.
+**No hay consola que ocultar porque nunca se crea una.** El primer intento
+la ocultaba con `GetConsoleWindow` + `ShowWindow` después de que el ícono
+arrancaba, y no funcionaba en Windows 11: ahí el host de consola por
+defecto es Windows Terminal, que envuelve la consola real por ConPTY — la
+ventana que ve el usuario no es la misma que esa API alcanza a tocar, así
+que "ocultarla" no hacía nada visible. `packaging/build.py` compila con
+`--windowed`: sin subsistema de consola, no hay ventana de ningún host que
+gestionar.
 
-Para quien prefiera la consola de siempre —depurando, o si algo con la
-bandeja no funciona en su máquina— `SUNAT_SIN_BANDEJA=1` la desactiva y
-vuelve al modo anterior tal cual.
+La contrapartida es que un fallo antes de que el ícono llegue a existir
+—por ejemplo, la descarga de Chromium en el primer arranque— no tiene
+dónde mostrarse. Lo cubre [`avisos.py`](src/sunat/avisos.py) con un
+diálogo nativo de Windows (`MessageBoxW`), y
+[`__main__._con_red_de_seguridad()`](src/sunat/__main__.py) envuelve todo
+el arranque: cualquier excepción no capturada termina en un diálogo de
+error más una línea en el log, en vez de un ícono que nunca aparece sin
+ninguna pista de por qué.
+
+Para quien prefiera la consola de siempre —depurando— `SUNAT_SIN_BANDEJA=1`
+crea una a pedido con `AllocConsole` y corre el modo anterior tal cual.
 
 ### Qué resolvió `packaging/build.py` que no era obvio
 

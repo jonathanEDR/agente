@@ -13,9 +13,12 @@ primera sesión de la vida de esta instalación?", que solo pasa una vez.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import sys
 from pathlib import Path
+
+from . import avisos
 
 # --- dónde vive el navegador -------------------------------------------------
 #
@@ -72,6 +75,19 @@ def _chromium_instalado() -> bool:
     return any(p.name.startswith("chromium-") for p in _RUTA_NAVEGADORES.iterdir())
 
 
+def _informar(mensaje: str) -> None:
+    """Muestra un mensaje donde se pueda: consola si hay, si no un dialogo.
+
+    El `.exe` distribuido no tiene consola (se compila `--windowed`), así
+    que `print()` no tiene a dónde escribir —en ese modo `sys.stdout` es
+    `None`, y llamarlo igual sería un `AttributeError`—. `python -m sunat`
+    en desarrollo sí tiene consola, y ahí basta con imprimir.
+    """
+    if sys.stdout is not None:
+        print(mensaje)
+    _log.info(mensaje)
+
+
 def _instalar_chromium() -> None:
     """Descarga Chromium llamando al instalador de Playwright en el mismo
     proceso, sin pasar por una terminal ni por `pip`.
@@ -87,10 +103,15 @@ def _instalar_chromium() -> None:
     `playwright/driver/`), así que llamarlo directo funciona igual
     congelado que en un venv normal.
     """
-    print()
-    print("Preparando el navegador por primera vez. Puede tardar unos")
-    print("minutos según tu conexión — solo pasa una vez.")
-    print()
+    # Sin consola y sin ícono de bandeja todavía (recién se crea después de
+    # esto), una descarga de minutos se ve como el programa colgado. El
+    # diálogo es la única señal de vida posible en ese momento.
+    avisos.avisar(
+        "Preparando el navegador por primera vez.\n\n"
+        "Puede tardar unos minutos según tu conexión — solo pasa una vez.\n\n"
+        "Haz clic en Aceptar para continuar."
+    )
+    _informar("Preparando el navegador por primera vez...")
 
     import playwright.__main__ as pw_main
 
@@ -109,8 +130,7 @@ def _instalar_chromium() -> None:
     finally:
         sys.argv = argv_original
 
-    print("Listo. Iniciando el agente...")
-    print()
+    _informar("Listo. Iniciando el agente...")
 
 
 def _quiere_bandeja() -> bool:
@@ -129,6 +149,27 @@ def _quiere_bandeja() -> bool:
     return True
 
 
+def _asegurar_consola() -> None:
+    """Crea una consola si el proceso no tiene ninguna, para el modo
+    `SUNAT_SIN_BANDEJA=1`.
+
+    El `.exe` distribuido se compila `--windowed`: no arranca con consola
+    propia, así que "volver al modo consola de siempre" necesita crear una
+    a pedido con `AllocConsole`. En desarrollo (`python -m sunat` desde una
+    terminal) ya hay una — `AllocConsole` simplemente no hace nada ahí, sin
+    que haga falta distinguir los dos casos antes de llamarla.
+    """
+    if os.name != "nt":
+        return
+    kernel32 = ctypes.windll.kernel32
+    if kernel32.GetConsoleWindow():
+        return
+    if not kernel32.AllocConsole():
+        return
+    sys.stdout = open("CONOUT$", "w", encoding="utf-8")  # noqa: SIM115
+    sys.stderr = open("CONOUT$", "w", encoding="utf-8")  # noqa: SIM115
+
+
 def main(puerto: int | None = None) -> int:
     from .agente import PUERTO_POR_DEFECTO, crear_servidor, iniciar, preparar
 
@@ -142,6 +183,7 @@ def main(puerto: int | None = None) -> int:
     puerto = puerto or PUERTO_POR_DEFECTO
 
     if not _quiere_bandeja():
+        _asegurar_consola()
         return iniciar(cfg, puerto=puerto)
 
     from . import bandeja

@@ -36,10 +36,15 @@ HOST_MENU = "e-menu.sunat.gob.pe"
 # Ahora el panel vive en la nube, así que sus orígenes son un dato del
 # producto y tienen que estar aquí.
 #
-# En producción se agrega el dominio real con SUNAT_PANEL_ORIGENES.
+# El dominio de producción va HORNEADO aquí, no solo detrás de
+# SUNAT_PANEL_ORIGENES: el .exe se distribuye a usuarios sin conocimientos
+# técnicos, que no van a configurar una variable de entorno para que el
+# panel les funcione. La variable queda disponible para dominios
+# adicionales (un white-label, un ambiente de staging), no para este caso.
 PANEL_ORIGENES = (
     "http://127.0.0.1:5173",
     "http://localhost:5173",
+    "https://conta-beta-puce.vercel.app",
 )
 
 # SUNAT corta la conexión (ERR_CONNECTION_RESET) con el user-agent que

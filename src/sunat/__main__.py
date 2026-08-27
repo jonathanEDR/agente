@@ -27,5 +27,34 @@ def main(argv: list[str] | None = None) -> int:
     return arrancar(puerto=puerto)
 
 
+def _con_red_de_seguridad() -> int:
+    """Envuelve `main()` para que un fallo temprano no desaparezca en
+    silencio.
+
+    El `.exe` distribuido no tiene consola: sin esto, una excepción antes
+    de que exista el ícono de bandeja simplemente cierra el proceso sin
+    dejar rastro visible —el usuario ve el ícono que nunca llegó a
+    aparecer, y ninguna pista de por qué. Con esto, al menos queda un
+    diálogo y una línea en el log.
+    """
+    try:
+        return main()
+    except Exception as e:  # noqa: BLE001 - esto es precisamente el manejador de última instancia
+        from . import avisos
+        from .log import obtener
+
+        try:
+            obtener("__main__").exception("Fallo no manejado al arrancar")
+        except Exception:  # el logging mismo pudo no estar configurado aun
+            pass
+
+        avisos.avisar_error(
+            f"El agente no pudo iniciar:\n\n{e}\n\n"
+            "Revisa el registro en "
+            "%LOCALAPPDATA%\\sunat-launcher\\logs\\sunat.log para más detalle."
+        )
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_con_red_de_seguridad())
