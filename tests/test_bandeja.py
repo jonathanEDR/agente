@@ -32,6 +32,26 @@ def test_crear_servidor_arma_el_mismo_app(tmp_path):
     assert servidor.config.port == 17999
 
 
+def test_crear_servidor_funciona_sin_stdout(tmp_path, monkeypatch):
+    """Regresión: el `.exe` --windowed corre con sys.stdout/stderr en None
+    cuando se abre con doble clic desde el Explorador (no cuando se lanza
+    desde una terminal, que hereda un stream real aunque esté oculta).
+
+    Sin `log_config=None` en `uvicorn.Config`, esto fallaba con
+    `ValueError: Unable to configure formatter 'default'`: uvicorn arma su
+    propio logging con color y llama `.isatty()` sobre stdout/stderr para
+    decidir si lo soporta, y `None.isatty()` revienta. El síntoma en
+    Windows era un diálogo de "El agente no pudo iniciar" en el primer
+    doble clic real, que ninguna prueba lanzada desde una terminal —donde
+    stdout siempre existe— podía reproducir.
+    """
+    monkeypatch.setattr("sys.stdout", None)
+    monkeypatch.setattr("sys.stderr", None)
+
+    cfg = replace(Config(data_dir=tmp_path), api_url="")
+    crear_servidor(cfg, puerto=17996)  # no debe lanzar
+
+
 def test_arranque_respeta_sunat_sin_bandeja(monkeypatch):
     from sunat import arranque
 

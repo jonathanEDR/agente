@@ -533,12 +533,26 @@ def crear_servidor(cfg: Config, puerto: int = PUERTO_POR_DEFECTO) -> "uvicorn.Se
     bandeja necesita un handle para apagarlo desde otro hilo —el del ícono—
     poniendo `servidor.should_exit = True`. `uvicorn.run()` no da eso: corre
     y bloquea hasta Ctrl+C, sin forma de pedirle que pare desde afuera.
+
+    `log_config=None` es obligatorio en el `.exe` empaquetado. Por defecto,
+    `uvicorn.Config` configura su propio logging con colores, y para
+    decidir si el terminal los soporta llama `.isatty()` sobre
+    `sys.stdout`/`sys.stderr`. El `.exe` se compila `--windowed`: cuando
+    corre sin ninguna consola heredada (doble clic desde el Explorador,
+    a diferencia de lanzarlo desde una terminal), esos dos son `None`, y
+    `None.isatty()` revienta con
+    `ValueError: Unable to configure formatter 'default'` —un mensaje que
+    no menciona stdout ni colores en ningún lado. No hace falta el logging
+    de uvicorn de todos modos: `agente.py` ya usa el logger propio de
+    `log.py` para todo lo que importa.
     """
     import uvicorn
 
     token = obtener_token(cfg)
     app = crear_app(cfg, token, puerto)
-    configuracion = uvicorn.Config(app, host=HOST, port=puerto, log_level="warning")
+    configuracion = uvicorn.Config(
+        app, host=HOST, port=puerto, log_level="warning", log_config=None
+    )
     return uvicorn.Server(configuracion)
 
 
