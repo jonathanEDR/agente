@@ -300,6 +300,9 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
         return {
             "bloqueada": estado.bloqueada,
             "boveda_creada": existe,
+            # Solo se sabe con la bóveda abierta: los parámetros viajan en su
+            # cabecera y leerla exige haber desbloqueado.
+            "kdf_debil": estado.vault.kdf_debil if estado.vault else False,
             "origen": repo.describir(),
             "vinculado": vinculacion.leer(cfg) is not None,
             "backend_ok": backend_ok,
@@ -329,7 +332,20 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
             creada = True
             _log.info("Bóveda creada en %s", repo.describir())
         estado.tocar()
-        return {"ok": True, "boveda_creada_ahora": creada}
+
+        if estado.vault.kdf_debil:
+            _log.warning(
+                "Esta bóveda se creó con parámetros de cifrado anteriores y "
+                "resiste bastante menos ante un ataque sin conexión. Para "
+                "subirlos hay que crear una bóveda nueva y volver a registrar "
+                "las empresas."
+            )
+
+        return {
+            "ok": True,
+            "boveda_creada_ahora": creada,
+            "kdf_debil": estado.vault.kdf_debil,
+        }
 
     @app.post("/api/bloquear", dependencies=protegido)
     def bloquear() -> dict[str, bool]:
@@ -522,6 +538,10 @@ def preparar(cfg: Config | None = None) -> Config:
 
     if (viejos := limpiar_perfiles_viejos(cfg)):
         _log.info("Limpiados perfiles del esquema anterior: %s", ", ".join(viejos))
+
+    # Las instalaciones anteriores guardaron el token en texto plano. Se
+    # protege al arrancar, una sola vez, sin pedirle nada al usuario.
+    vinculacion.proteger_en_disco(cfg)
 
     return cfg
 

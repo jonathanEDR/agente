@@ -49,9 +49,27 @@ class GestorFalso:
         return []
 
 
+# Backends que estos tests dan por buenos. Van por `backends_extra` —la
+# variable de entorno— porque es justo el mecanismo previsto para ambientes
+# que no son produccion, y asi los tests ejercitan el camino real en vez de
+# esquivar la lista blanca.
+BACKENDS_DE_PRUEBA = ",".join(
+    [
+        "https://api.ejemplo.com",
+        "https://nueva.ejemplo.com",
+        "https://vieja.ejemplo.com",
+    ]
+)
+
+
 @pytest.fixture
 def cfg(tmp_path):
-    return replace(Config(data_dir=tmp_path), api_url="", api_key="")
+    return replace(
+        Config(data_dir=tmp_path),
+        api_url="",
+        api_key="",
+        backends_extra=BACKENDS_DE_PRUEBA,
+    )
 
 
 @pytest.fixture
@@ -68,26 +86,78 @@ def cliente(cfg, monkeypatch):
 # --- a qué backend se deja apuntar el token ---------------------------------
 
 
+PERMITIDOS = ["https://api.ejemplo.com", "http://127.0.0.1:4000"]
+
+
 def test_exige_https_fuera_de_localhost():
     with pytest.raises(VinculacionInvalida):
-        vinculacion.validar_api_url("http://api.ejemplo.com")
+        vinculacion.validar_api_url("http://api.ejemplo.com", PERMITIDOS)
 
 
-def test_acepta_https():
-    assert vinculacion.validar_api_url("https://api.ejemplo.com/") == (
+def test_acepta_un_backend_de_la_lista():
+    assert vinculacion.validar_api_url("https://api.ejemplo.com/", PERMITIDOS) == (
         "https://api.ejemplo.com"
     )
 
 
-@pytest.mark.parametrize("url", ["http://127.0.0.1:4000", "http://localhost:4000"])
-def test_acepta_http_solo_en_localhost(url):
-    assert vinculacion.validar_api_url(url) == url
+def test_acepta_http_solo_en_localhost():
+    assert (
+        vinculacion.validar_api_url("http://127.0.0.1:4000", PERMITIDOS)
+        == "http://127.0.0.1:4000"
+    )
 
 
 def test_rechaza_esquemas_raros():
     for url in ["file:///etc/passwd", "ftp://ejemplo.com", ""]:
         with pytest.raises(VinculacionInvalida):
-            vinculacion.validar_api_url(url)
+            vinculacion.validar_api_url(url, PERMITIDOS)
+
+
+# --- la lista blanca --------------------------------------------------------
+#
+# Lo que se cuida aqui es el escenario de A2: un script en el panel llamando a
+# /api/vincular con un backend suyo. Antes bastaba que fuera https.
+
+
+def test_rechaza_un_backend_que_no_esta_en_la_lista():
+    with pytest.raises(VinculacionInvalida):
+        vinculacion.validar_api_url("https://servidor-del-atacante.com", PERMITIDOS)
+
+
+def test_rechaza_el_truco_del_arroba():
+    """`https://backend-real@evil.com` tiene como host a evil.com.
+
+    Comparar la cadena tal como llego lo daria por bueno; por eso se compara
+    el origen reconstruido.
+    """
+    with pytest.raises(VinculacionInvalida):
+        vinculacion.validar_api_url("https://api.ejemplo.com@evil.com", PERMITIDOS)
+
+
+def test_rechaza_un_subdominio_que_solo_se_parece():
+    with pytest.raises(VinculacionInvalida):
+        vinculacion.validar_api_url("https://api.ejemplo.com.evil.com", PERMITIDOS)
+
+
+def test_rechaza_una_url_con_ruta():
+    with pytest.raises(VinculacionInvalida):
+        vinculacion.validar_api_url("https://api.ejemplo.com/api", PERMITIDOS)
+
+
+def test_guardar_rechaza_un_backend_de_fuera(cfg):
+    """La lista llega desde la config, no como argumento suelto."""
+    with pytest.raises(VinculacionInvalida):
+        vinculacion.guardar(cfg, TOKEN_DISPOSITIVO, "https://servidor-del-atacante.com")
+
+    assert vinculacion.leer(cfg) is None
+
+
+def test_el_backend_del_producto_esta_permitido():
+    from sunat.config import BACKENDS_PERMITIDOS
+
+    cfg_limpia = Config()
+    for backend in BACKENDS_PERMITIDOS:
+        assert vinculacion.validar_api_url(backend, cfg_limpia.backends_permitidos())
 
 
 # --- guardar y leer ---------------------------------------------------------

@@ -55,20 +55,23 @@ def test_parametros_corruptos():
 
 
 def test_caja_descifra_lo_que_cifra():
-    caja, _params, _check = Caja.nueva("clave-maestra")
+    caja, _params, _check = Caja.nueva("clave-maestra-de-prueba")
     assert caja.descifrar(caja.cifrar("claveSOL")) == "claveSOL"
 
 
 def test_caja_rechaza_password_equivocada():
-    _caja, params, check = Caja.nueva("correcta")
+    _caja, params, check = Caja.nueva("correcta-y-bien-larga")
     with pytest.raises(ClaveMaestraInvalida):
-        Caja.abrir("incorrecta", params, check)
+        Caja.abrir("incorrecta-y-bien-larga", params, check)
 
 
 def test_caja_reabierta_descifra_lo_de_antes():
-    caja, params, check = Caja.nueva("clave-larga")
+    caja, params, check = Caja.nueva("clave-larga-de-verdad")
     token = caja.cifrar("secreto")
-    assert Caja.abrir("clave-larga", params, check).descifrar(token) == "secreto"
+    assert (
+        Caja.abrir("clave-larga-de-verdad", params, check).descifrar(token)
+        == "secreto"
+    )
 
 
 # --- doble del transporte HTTP ----------------------------------------------
@@ -136,9 +139,9 @@ def test_crear_y_reabrir(repo):
 
 
 def test_password_incorrecta(repo):
-    Vault.crear(repo, "correcta")
+    Vault.crear(repo, "correcta-y-bien-larga")
     with pytest.raises(ClaveMaestraInvalida):
-        Vault.abrir(repo, "incorrecta")
+        Vault.abrir(repo, "incorrecta-y-bien-larga")
 
 
 def test_abrir_boveda_inexistente(repo):
@@ -254,22 +257,87 @@ def test_no_deja_crear_una_boveda_con_password_corta(repo):
         Vault.crear(repo, "ab")
 
 
-def test_acepta_una_password_de_longitud_suficiente(repo):
-    from sunat.crypto import MINIMO_PASSWORD
+def test_acepta_una_frase_larga(repo):
+    """Una frase de varias palabras vale aunque no tenga simbolos.
 
-    Vault.crear(repo, "x" * MINIMO_PASSWORD)
+    Es lo contrario de lo que suelen pedir estos formularios, y es lo
+    correcto: obligar a meter un simbolo en una frase de treinta caracteres
+    solo consigue que la gente la acorte y la apunte en un papel.
+    """
+    Vault.crear(repo, "mi gato duerme sobre el teclado")
     assert repo.existe()
 
 
-def test_abrir_no_exige_longitud_minima(tmp_path, monkeypatch):
-    """La regla aplica al crear, no al abrir: una bóveda vieja con
-    contraseña corta debe seguir siendo accesible."""
+@pytest.mark.parametrize(
+    "password,motivo",
+    [
+        ("Sun4t!", "demasiado corta"),
+        ("contabilidad", "palabra sola de diccionario"),
+        ("Sunat2024", "corta, y el ano al final no cuenta"),
+        ("Contrasena2024", "sin tildes y sin el ano, es 'contrasena'"),
+        ("xxxxxxxxxxxx", "un solo caracter repetido"),
+        ("abcdefghijkl", "teclas seguidas"),
+        ("micontrasena1", "menos de 16 y solo dos tipos de caracter"),
+    ],
+)
+def test_rechaza_contrasenas_que_no_aguantan_un_ataque_sin_conexion(
+    repo, password, motivo
+):
+    """El atacante no las prueba contra el agente sino sin conexion.
+
+    Con el token de dispositivo se lleva la cabecera de la boveda y las
+    claves cifradas, y desde ahi prueba a la velocidad de su hardware. Un
+    diccionario de las mil mas usadas se agota en minutos por larga que sea
+    cada entrada, asi que la longitud sola no alcanza.
+    """
+    from sunat.errors import PasswordDebil
+
+    with pytest.raises(PasswordDebil):
+        Vault.crear(repo, password)
+
+
+def test_abrir_no_aplica_la_politica(tmp_path, monkeypatch):
+    """La regla aplica al crear, no al abrir.
+
+    Una boveda creada cuando el minimo eran 8 caracteres tiene que seguir
+    abriendo: aplicarle la politica de hoy dejaria sus datos enterrados, que
+    es exactamente el dano que la politica quiere evitar.
+    """
     import sunat.crypto as cripto
     from sunat.repositorios import RepositorioArchivo
 
     ruta = tmp_path / "vieja.json"
-    monkeypatch.setattr(cripto, "MINIMO_PASSWORD", 1)
-    Vault.crear(RepositorioArchivo(ruta), "ab")
+    monkeypatch.setattr(cripto, "validar_password_nueva", lambda _p: None)
+    Vault.crear(RepositorioArchivo(ruta), "corta")
 
-    monkeypatch.setattr(cripto, "MINIMO_PASSWORD", 8)
-    assert Vault.abrir(RepositorioArchivo(ruta), "ab").listar() == []
+    monkeypatch.undo()
+    assert Vault.abrir(RepositorioArchivo(ruta), "corta").listar() == []
+
+
+def test_una_boveda_nueva_no_nace_debil(repo):
+    from sunat.crypto import SCRYPT_N
+
+    vault = Vault.crear(repo, "mi gato duerme sobre el teclado")
+    assert vault.kdf_debil is False
+    assert vault._params.n == SCRYPT_N
+
+
+def test_una_boveda_vieja_se_detecta_como_debil(tmp_path):
+    """Las creadas con scrypt 2^15 siguen abriendo, pero se avisan.
+
+    No se pueden migrar solas: cambiar los parametros obliga a volver a
+    cifrar todas las claves, y hacerlo a medias dejaria la boveda ilegible.
+    """
+    from sunat.crypto import Caja, ParametrosKDF
+    from sunat.repositorios import RepositorioArchivo
+
+    repo = RepositorioArchivo(tmp_path / "vieja.json")
+    params = ParametrosKDF(salt=ParametrosKDF.nuevos().salt, n=2**15, r=8, p=1)
+    caja = Caja(__import__("cryptography.fernet", fromlist=["Fernet"]).Fernet(
+        __import__("sunat.crypto", fromlist=["derivar_llave"]).derivar_llave(
+            "mi gato duerme sobre el teclado", params
+        )
+    ))
+    repo.crear(params, caja.cifrar("sunat-launcher-vault-v1"))
+
+    assert Vault.abrir(repo, "mi gato duerme sobre el teclado").kdf_debil is True

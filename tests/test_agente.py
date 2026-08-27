@@ -116,9 +116,9 @@ def test_desbloquear_crea_la_boveda_la_primera_vez(cliente):
 
 
 def test_password_incorrecta_tras_crearla(cliente):
-    desbloquear(cliente, "correcta-larga")
+    desbloquear(cliente, "correcta-larga-de-prueba")
     cliente.post("/api/bloquear", headers=CABECERAS)
-    r = desbloquear(cliente, "incorrecta-larga")
+    r = desbloquear(cliente, "incorrecta-larga-de-prueba")
     assert r.status_code == 400
     assert "incorrecta" in r.json()["error"].lower()
 

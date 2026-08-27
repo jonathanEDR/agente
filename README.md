@@ -266,3 +266,43 @@ bandeja (`SUNAT_PANEL_URL`), desactivar la bandeja y volver a consola
 una sola llave compartida (`SUNAT_API_URL` / `SUNAT_API_KEY`), que la
 vinculación por panel reemplaza pero no rompe si ya lo tenías configurado
 así.
+
+### A qué backend se deja vincular
+
+`config.BACKENDS_PERMITIDOS` es una lista blanca horneada en el ejecutable.
+Antes bastaba con que la URL fuera `https://`, así que un script inyectado
+en el panel podía apuntar el agente a un servidor suyo con un solo POST a
+`/api/vincular`: desde ahí le servía al usuario una bóveda que no era la
+suya y recibía cada clave cifrada que guardara después.
+
+Va horneada y no en una variable de entorno por lo mismo que
+`PANEL_ORIGENES`: una lista que se puede ampliar desde la web no es una
+lista blanca. `SUNAT_BACKENDS` agrega destinos para un ambiente propio —
+quien puede poner una variable de entorno ya ejecuta código en esa máquina,
+así que no gana nada nuevo; una página, en cambio, no puede tocarla.
+
+Los backends de `localhost` valen solo corriendo desde el código fuente. En
+el `.exe` que instala el contador no hay ningún motivo legítimo para
+vincular contra localhost, y sí uno ilegítimo.
+
+### La contraseña maestra
+
+Al **crear** una bóveda se exigen 12 caracteres, que no sea una secuencia de
+teclas, que no esté en la lista de las más usadas —comparada sin tildes y
+sin el año del final— y, por debajo de 16 caracteres, tres de los cuatro
+tipos (minúsculas, mayúsculas, números, símbolos). A partir de 16 no se
+exige variedad: una frase de varias palabras es más fuerte que una palabra
+con símbolos, y obligarla a llevar un `@` solo consigue que la gente la
+acorte.
+
+Nada de eso se aplica al **abrir**. Una bóveda creada cuando el mínimo eran
+8 caracteres tiene que seguir abriendo: aplicarle la política de hoy dejaría
+sus datos enterrados, que es justo el daño que la política quiere evitar.
+
+El KDF pasó de scrypt N=2^15 a N=2^17 (~128 MB, ~270 ms). Las bóvedas
+anteriores siguen abriendo con sus propios parámetros —van guardados en su
+cabecera— y el agente las marca como `kdf_debil` en `/api/estado` y en el
+registro. **No se migran solas**: cambiar los parámetros obliga a volver a
+cifrar todas las claves con la llave nueva, y hacerlo a medias dejaría la
+bóveda ilegible. Hoy la única vía es crear una bóveda nueva y volver a
+registrar las empresas.

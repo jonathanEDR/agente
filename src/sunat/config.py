@@ -47,6 +47,36 @@ PANEL_ORIGENES = (
     "https://conta-beta-puce.vercel.app",
 )
 
+# A qué backends se deja vincular este agente.
+#
+# `validar_api_url` comprobaba solo el esquema, así que cualquier origen ya
+# permitido —o un script inyectado en el panel— podía repuntar el agente a un
+# servidor suyo con un único POST. Desde ahí le sirve al usuario una bóveda
+# que no es la suya y recibe cada clave cifrada que guarde después.
+#
+# Horneado y no configurable por defecto, por lo mismo que PANEL_ORIGENES: el
+# .exe lo instala gente que no va a poner una variable de entorno, y una
+# lista blanca que el atacante puede ampliar desde la web no es una lista
+# blanca.
+BACKENDS_PERMITIDOS = ("https://conta-back-tq15.onrender.com",)
+
+# El backend de desarrollo. Solo vale corriendo desde el código fuente: en el
+# .exe empaquetado no se acepta, porque ahí no hay ningún motivo legítimo para
+# vincular contra localhost y sí uno ilegítimo —un proceso local haciéndose
+# pasar por el backend.
+BACKENDS_LOCALES = (
+    "http://127.0.0.1:4000",
+    "http://localhost:4000",
+)
+
+
+def _empaquetado() -> bool:
+    """Si estamos dentro del .exe de PyInstaller y no en el código fuente."""
+    import sys
+
+    return getattr(sys, "frozen", False)
+
+
 # SUNAT corta la conexión (ERR_CONNECTION_RESET) con el user-agent que
 # Chromium headless envía por defecto. Hay que mandar uno de navegador real.
 USER_AGENT = (
@@ -180,6 +210,14 @@ class Config:
         default_factory=lambda: _env_str("SUNAT_PANEL_ORIGENES", "")
     )
 
+    # Backends adicionales a los que se puede vincular, separados por coma.
+    #
+    # Una variable de entorno y no un dato que llegue por HTTP: quien puede
+    # ponerla ya ejecuta código en esta máquina, así que no le da nada nuevo;
+    # una página, en cambio, no puede tocarla. Esa es toda la diferencia entre
+    # esto y el agujero que cierra la lista blanca.
+    backends_extra: str = field(default_factory=lambda: _env_str("SUNAT_BACKENDS", ""))
+
     # A dónde abre "Abrir panel" en el ícono de la bandeja. El agente ya no
     # sirve el panel él mismo —vive en un repo aparte, en la nube o en
     # :5173 en desarrollo— así que tiene que saber la URL por fuera.
@@ -257,6 +295,19 @@ class Config:
         ]
         # dict.fromkeys y no set: el orden importa para los mensajes de error.
         return list(dict.fromkeys([*PANEL_ORIGENES, *extra]))
+
+    def backends_permitidos(self) -> list[str]:
+        """A qué backends se deja vincular esta instalación.
+
+        Los locales entran solo corriendo desde el código fuente. En el .exe
+        que usa el contador, vincular contra localhost no resuelve ningún caso
+        real y sí abre uno malo, así que ahí no está.
+        """
+        extra = [
+            b.strip().rstrip("/") for b in self.backends_extra.split(",") if b.strip()
+        ]
+        locales = [] if _empaquetado() else list(BACKENDS_LOCALES)
+        return list(dict.fromkeys([*BACKENDS_PERMITIDOS, *locales, *extra]))
 
     def asegurar_directorios(self) -> None:
         for carpeta in (self.data_dir, self.profiles_dir, self.logs_dir):

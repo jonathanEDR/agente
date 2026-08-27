@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .crypto import Caja
+from .crypto import Caja, ParametrosKDF, parametros_debiles
 from .errors import EmpresaNoEncontrada, VaultNoExiste
 from .repositorios import Empresa, Repositorio, RepositorioArchivo
 
@@ -22,9 +22,23 @@ __all__ = ["Empresa", "Vault"]
 
 
 class Vault:
-    def __init__(self, repo: Repositorio, caja: Caja) -> None:
+    def __init__(
+        self, repo: Repositorio, caja: Caja, params: ParametrosKDF | None = None
+    ) -> None:
         self._repo = repo
         self._caja = caja
+        self._params = params
+
+    @property
+    def kdf_debil(self) -> bool:
+        """Si esta bóveda se creó con parámetros más flojos que los de hoy.
+
+        Las bóvedas creadas antes de subir scrypt a 2^17 siguen abriendo con
+        los suyos —van guardados junto a los datos— y eso es lo correcto: la
+        alternativa sería dejarlas ilegibles. Pero conviene que el usuario lo
+        sepa, porque su bóveda resiste cuatro veces menos que una nueva.
+        """
+        return self._params is not None and parametros_debiles(self._params)
 
     # --- creación / apertura ------------------------------------------------
 
@@ -37,7 +51,7 @@ class Vault:
         repo = _como_repo(repo)
         caja, params, verificador = Caja.nueva(password)
         repo.crear(params, verificador)
-        return cls(repo, caja)
+        return cls(repo, caja, params)
 
     @classmethod
     def abrir(cls, repo: Repositorio | Path, password: str) -> "Vault":
@@ -48,7 +62,7 @@ class Vault:
                 "Crea una registrando tu primera empresa."
             )
         params, verificador = repo.leer_cabecera()
-        return cls(repo, Caja.abrir(password, params, verificador))
+        return cls(repo, Caja.abrir(password, params, verificador), params)
 
     # --- consulta -----------------------------------------------------------
 
