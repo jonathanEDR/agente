@@ -285,6 +285,18 @@ Los backends de `localhost` valen solo corriendo desde el código fuente. En
 el `.exe` que instala el contador no hay ningún motivo legítimo para
 vincular contra localhost, y sí uno ilegítimo.
 
+### Bajar de versión obliga a volver a vincular
+
+A partir de v1.4.0 el token de `device.json` se guarda protegido con DPAPI,
+con el prefijo `dpapi1:`. Un agente **anterior** no conoce ese formato: lee el
+blob entero como si fuera el token y se lo manda al backend, que lógicamente
+lo rechaza. El síntoma es «El backend rechazó el token de esta computadora»
+en un equipo que estaba perfectamente vinculado.
+
+Subir de versión es transparente —el token en claro se migra solo al primer
+arranque— pero **bajar no lo es**: hay que borrar `device.json` y volver a
+vincular desde el panel.
+
 ### La contraseña maestra
 
 Al **crear** una bóveda se exigen 12 caracteres, que no sea una secuencia de
