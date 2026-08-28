@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from . import plataformas, vinculacion
 from .config import Config, cargar_config, crear_repositorio, limpiar_perfiles_viejos
 from .errors import SunatError
+from .repositorios import TokenRechazado
 from .log import configurar, obtener
 from .sesiones import Evento, GestorSesiones
 from .store import Vault
@@ -49,6 +50,33 @@ HOST = "127.0.0.1"
 # Tras este rato sin actividad, la bóveda se vuelve a bloquear y hay que
 # escribir la contraseña maestra otra vez.
 MINUTOS_INACTIVIDAD = 30
+
+# Cuánto se recuerda lo que dijo el backend antes de volver a preguntarle.
+#
+# El panel consulta /api/estado cada 5 segundos y cada consulta hacía un viaje
+# de ida y vuelta a Render: 12 peticiones por minuto para responder algo que
+# casi nunca cambia.
+#
+# Con el token revocado eso además eran 12 RECHAZOS por minuto, suficiente
+# para que el limitador del backend empiece a responder 429 — y entonces el
+# agente ya no puede distinguir "me revocaron" de "el backend está saturado",
+# que es justo la diferencia que el usuario necesita ver.
+SEGUNDOS_SONDEO = 20
+
+# Un token revocado no se arregla solo: lo único que lo cambia es volver a
+# vincular, y eso invalida este recuerdo explícitamente. No tiene sentido
+# seguir preguntando cada veinte segundos.
+SEGUNDOS_SONDEO_RECHAZADO = 120
+
+
+class Backend:
+    """Lo último que se supo del backend."""
+
+    def __init__(self, existe: bool, ok: bool, revocado: bool, detalle: str) -> None:
+        self.existe = existe
+        self.ok = ok
+        self.revocado = revocado
+        self.detalle = detalle
 
 
 class Estado:
@@ -66,6 +94,33 @@ class Estado:
         self.ultimo_uso = time.monotonic()
         # Cada cliente SSE recibe su propia copia de los eventos.
         self._suscriptores: list[queue.Queue[Evento]] = []
+        # (cuándo caduca, qué se supo). Ver SEGUNDOS_SONDEO.
+        self._sondeo: tuple[float, Backend] | None = None
+
+    # --- backend ------------------------------------------------------------
+
+    def sondear_backend(self, repo) -> Backend:
+        """Si el backend responde y si la bóveda existe, con memoria corta."""
+        ahora = time.monotonic()
+        if self._sondeo is not None and ahora < self._sondeo[0]:
+            return self._sondeo[1]
+
+        try:
+            info = Backend(existe=repo.existe(), ok=True, revocado=False, detalle="")
+            ttl = SEGUNDOS_SONDEO
+        except TokenRechazado as e:
+            info = Backend(existe=False, ok=False, revocado=True, detalle=str(e))
+            ttl = SEGUNDOS_SONDEO_RECHAZADO
+        except SunatError as e:
+            info = Backend(existe=False, ok=False, revocado=False, detalle=str(e))
+            ttl = SEGUNDOS_SONDEO
+
+        self._sondeo = (ahora + ttl, info)
+        return info
+
+    def olvidar_sondeo(self) -> None:
+        """Tras vincular, desvincular o crear la bóveda, lo recordado ya no vale."""
+        self._sondeo = None
 
     # --- bóveda -------------------------------------------------------------
 
@@ -269,6 +324,7 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
         # contra el nuevo no descifra nada. Bloquear obliga a escribir la
         # contraseña maestra otra vez, que es lo correcto.
         estado.vault = None
+        estado.olvidar_sondeo()
 
         _log.info("Agente vinculado a %s", repo.describir())
         return {"ok": True, "origen": repo.describir()}
@@ -283,6 +339,7 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
         """
         habia = vinculacion.olvidar(cfg)
         estado.vault = None
+        estado.olvidar_sondeo()
         return {"ok": True, "habia_vinculacion": habia}
 
     # --- estado -------------------------------------------------------------
@@ -290,23 +347,23 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
     @app.get("/api/estado", dependencies=protegido)
     def estado_actual() -> dict[str, Any]:
         repo = crear_repositorio(cfg)
-        try:
-            existe = repo.existe()
-            backend_ok = True
-            detalle = ""
-        except SunatError as e:
-            existe, backend_ok, detalle = False, False, str(e)
+        backend = estado.sondear_backend(repo)
 
         return {
             "bloqueada": estado.bloqueada,
-            "boveda_creada": existe,
+            "boveda_creada": backend.existe,
+            # "El backend me rechazó" no es lo mismo que "el backend no
+            # responde": el primero se arregla volviendo a vincular y el
+            # segundo esperando. Sin separarlos, el panel mandaba a esperar a
+            # quien tenía que volver a vincular, y encima no le ofrecía dónde.
+            "token_revocado": backend.revocado,
             # Solo se sabe con la bóveda abierta: los parámetros viajan en su
             # cabecera y leerla exige haber desbloqueado.
             "kdf_debil": estado.vault.kdf_debil if estado.vault else False,
             "origen": repo.describir(),
             "vinculado": vinculacion.leer(cfg) is not None,
-            "backend_ok": backend_ok,
-            "detalle": detalle,
+            "backend_ok": backend.ok,
+            "detalle": backend.detalle,
             # Pares (ruc, plataforma): la misma empresa puede estar abierta
             # en una plataforma y cerrada en la otra.
             "abiertas": [
@@ -331,6 +388,10 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
             estado.vault = Vault.crear(repo, cuerpo.password)
             creada = True
             _log.info("Bóveda creada en %s", repo.describir())
+
+        # La bóveda pasó a existir, o se confirmó que ya estaba: lo que se
+        # recordara de antes queda viejo.
+        estado.olvidar_sondeo()
         estado.tocar()
 
         if estado.vault.kdf_debil:

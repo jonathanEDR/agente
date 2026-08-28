@@ -155,6 +155,16 @@ class ErrorApi(SunatError):
     """La API no respondió o respondió con error."""
 
 
+class TokenRechazado(ErrorApi):
+    """El backend no reconoce el token de esta computadora.
+
+    Va aparte del resto de errores de API porque el usuario tiene que hacer
+    algo distinto: no es "el backend está caído, espera", es "este equipo fue
+    revocado, vuelve a vincularlo". Sin distinguirlo, la interfaz manda a
+    esperar a alguien que va a esperar para siempre.
+    """
+
+
 class RepositorioApi:
     """Habla con el backend que guarda en MongoDB.
 
@@ -208,7 +218,7 @@ class RepositorioApi:
             except Exception:  # noqa: BLE001 - el cuerpo del error es opcional
                 pass
             if e.code in (401, 403):
-                raise ErrorApi(
+                raise TokenRechazado(
                     "El backend rechazó el token de esta computadora. Puede "
                     "haber sido revocado desde el panel: vuelve a vincularla."
                 ) from e

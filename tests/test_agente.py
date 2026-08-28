@@ -337,3 +337,114 @@ def test_el_listado_dice_en_que_plataformas_esta_abierta(cliente):
 
     empresas = cliente.get("/api/empresas", headers=CABECERAS).json()
     assert empresas[0]["abiertas"] == ["declaraciones"]
+
+
+# --- el equipo revocado -----------------------------------------------------
+#
+# El caso real: el usuario revoca su propio equipo desde el panel y el agente
+# se queda con un device.json que el backend ya no reconoce. Antes eso no
+# tenía salida en la interfaz — `vinculado` seguía siendo cierto, así que la
+# tarjeta de vincular no aparecía, y el panel ofrecía crear una bóveda que el
+# agente no podía crear.
+
+
+# El mismo texto que produce RepositorioApi ante un 401, para que el test
+# fije tambien lo que el usuario acaba leyendo.
+MOTIVO_REVOCADO = (
+    "El backend rechazó el token de esta computadora. Puede haber sido "
+    "revocado desde el panel: vuelve a vincularla."
+)
+
+
+class RepoRevocado:
+    """Doble del backend: rechaza el token, y cuenta cuántas veces se lo
+    preguntan."""
+
+    def __init__(self) -> None:
+        self.consultas = 0
+
+    def describir(self):
+        return "backend de prueba"
+
+    def existe(self):
+        from sunat.repositorios import TokenRechazado
+
+        self.consultas += 1
+        raise TokenRechazado(MOTIVO_REVOCADO)
+
+
+class RepoSano:
+    def describir(self):
+        return "backend de prueba"
+
+    def existe(self):
+        return True
+
+
+def test_estado_distingue_revocado_de_backend_caido(cliente, monkeypatch):
+    """Son dos problemas distintos y piden cosas distintas al usuario.
+
+    "El backend no responde" se arregla esperando; "me revocaron" solo se
+    arregla volviendo a vincular. Colapsarlos manda a esperar a quien iba a
+    esperar para siempre.
+    """
+    monkeypatch.setattr(modulo_agente, "crear_repositorio", lambda _cfg: RepoRevocado())
+
+    datos = cliente.get("/api/estado", headers=CABECERAS).json()
+
+    assert datos["token_revocado"] is True
+    assert datos["backend_ok"] is False
+    # El motivo llega intacto hasta el panel: es lo que se muestra en
+    # pantalla, no un codigo interno.
+    assert datos["detalle"] == MOTIVO_REVOCADO
+
+
+def test_un_backend_caido_no_se_reporta_como_revocado(cliente, monkeypatch):
+    class RepoCaido:
+        def describir(self):
+            return "backend de prueba"
+
+        def existe(self):
+            from sunat.repositorios import ErrorApi
+
+            raise ErrorApi("No se pudo conectar con la API.")
+
+    monkeypatch.setattr(modulo_agente, "crear_repositorio", lambda _cfg: RepoCaido())
+
+    datos = cliente.get("/api/estado", headers=CABECERAS).json()
+
+    assert datos["token_revocado"] is False
+    assert datos["backend_ok"] is False
+
+
+def test_no_se_le_pregunta_al_backend_en_cada_consulta(cliente, monkeypatch):
+    """El panel consulta /api/estado cada 5 segundos.
+
+    Sin memoria, cada una era un viaje a Render — y con el token revocado,
+    doce rechazos por minuto, suficiente para que el limitador del backend
+    empiece a devolver 429 y el agente ya no pueda distinguir "me revocaron"
+    de "está saturado".
+    """
+    repo = RepoRevocado()
+    monkeypatch.setattr(modulo_agente, "crear_repositorio", lambda _cfg: repo)
+
+    for _ in range(10):
+        assert cliente.get("/api/estado", headers=CABECERAS).json()["token_revocado"]
+
+    assert repo.consultas == 1, "diez consultas del panel, una sola al backend"
+
+
+def test_volver_a_vincular_olvida_lo_recordado(cliente, monkeypatch):
+    """Si no, el equipo recien vinculado seguiria mostrandose como revocado
+    durante los dos minutos que dura el recuerdo."""
+    repo = RepoRevocado()
+    monkeypatch.setattr(modulo_agente, "crear_repositorio", lambda _cfg: repo)
+    assert cliente.get("/api/estado", headers=CABECERAS).json()["token_revocado"]
+
+    # El panel vincula de nuevo: el backend vuelve a reconocer al equipo.
+    monkeypatch.setattr(modulo_agente, "crear_repositorio", lambda _cfg: RepoSano())
+    cliente.estado_agente.olvidar_sondeo()
+
+    datos = cliente.get("/api/estado", headers=CABECERAS).json()
+    assert datos["token_revocado"] is False
+    assert datos["boveda_creada"] is True
