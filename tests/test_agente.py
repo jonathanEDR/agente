@@ -448,3 +448,69 @@ def test_volver_a_vincular_olvida_lo_recordado(cliente, monkeypatch):
     datos = cliente.get("/api/estado", headers=CABECERAS).json()
     assert datos["token_revocado"] is False
     assert datos["boveda_creada"] is True
+
+
+def test_un_intento_fallido_de_vincular_no_borra_la_vinculacion_buena(
+    cliente, monkeypatch
+):
+    """La regresion que costo una vinculacion de verdad.
+
+    `POST /api/vincular` guardaba en disco y probaba despues, deshaciendo con
+    `olvidar()` si el backend rechazaba el token. Pero `olvidar()` borra el
+    archivo, no restaura el anterior: un intento fallido dejaba sin vincular a
+    una computadora que si lo estaba, y el token viejo no se puede recuperar
+    porque el backend solo lo muestra una vez.
+    """
+    from sunat import vinculacion
+    from sunat.config import Config
+
+    cfg = cliente.estado_agente.cfg
+    monkeypatch.setattr(
+        Config, "backends_permitidos", lambda _self: ["https://api.ejemplo.com"]
+    )
+
+    bueno = "sla_" + "b" * 64
+    vinculacion.guardar(cfg, bueno, "https://api.ejemplo.com")
+    assert vinculacion.leer(cfg).token == bueno
+
+    # El backend rechaza el token nuevo.
+    class RepoQueRechaza:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def existe(self):
+            from sunat.repositorios import TokenRechazado
+
+            raise TokenRechazado("El backend rechazó el token.")
+
+    monkeypatch.setattr(modulo_agente, "RepositorioApi", RepoQueRechaza)
+
+    r = cliente.post(
+        "/api/vincular",
+        json={"token": "sla_" + "0" * 64, "api_url": "https://api.ejemplo.com"},
+        headers=CABECERAS,
+    )
+    assert r.status_code == 400
+
+    # Lo que importa: la vinculacion que ya estaba sigue intacta.
+    leido = vinculacion.leer(cfg)
+    assert leido is not None, "el intento fallido borro la vinculacion buena"
+    assert leido.token == bueno
+
+
+def test_vincular_no_escribe_nada_si_el_backend_no_esta_en_la_lista(cliente):
+    from sunat import vinculacion
+
+    cfg = cliente.estado_agente.cfg
+
+    r = cliente.post(
+        "/api/vincular",
+        json={
+            "token": "sla_" + "0" * 64,
+            "api_url": "https://servidor-del-atacante.com",
+        },
+        headers=CABECERAS,
+    )
+
+    assert r.status_code == 400
+    assert vinculacion.leer(cfg) is None

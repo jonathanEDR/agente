@@ -37,8 +37,8 @@ from pydantic import BaseModel, Field
 from . import plataformas, vinculacion
 from .config import Config, cargar_config, crear_repositorio, limpiar_perfiles_viejos
 from .errors import SunatError
-from .repositorios import TokenRechazado
 from .log import configurar, obtener
+from .repositorios import RepositorioApi, TokenRechazado
 from .sesiones import Evento, GestorSesiones
 from .store import Vault
 
@@ -307,18 +307,31 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
 
     @app.post("/api/vincular", dependencies=protegido)
     def vincular(cuerpo: Vinculo) -> dict[str, Any]:
-        """Guarda el token de dispositivo que el panel pidió al backend."""
-        vinculacion.guardar(cfg, cuerpo.token, cuerpo.api_url)
+        """Guarda el token de dispositivo que el panel pidió al backend.
+
+        El orden es: validar, PROBAR, y solo entonces escribir.
+
+        Antes se guardaba primero y se probaba después, deshaciendo con
+        `olvidar()` si el backend rechazaba el token. El problema es que
+        `olvidar()` borra el archivo entero, no restaura lo que había: un
+        intento fallido de vincular dejaba sin vinculación a una computadora
+        que sí la tenía, y el token anterior no se puede recuperar porque el
+        backend solo lo muestra una vez.
+
+        Probando antes de escribir, un intento fallido no toca nada.
+        """
+        url = vinculacion.validar_api_url(cuerpo.api_url, cfg.backends_permitidos())
 
         # Se comprueba en el acto. Vincular contra un backend que no responde
         # deja al usuario con un "vinculado" que falla recién en la primera
         # acción real, y ahí ya no es evidente que la causa fue esto.
-        repo = crear_repositorio(cfg)
         try:
-            repo.existe()
+            RepositorioApi(url, cuerpo.token).existe()
         except SunatError as e:
-            vinculacion.olvidar(cfg)
             raise HTTPException(400, f"No se pudo hablar con el backend: {e}") from e
+
+        vinculacion.guardar(cfg, cuerpo.token, url)
+        repo = crear_repositorio(cfg)
 
         # La bóveda abierta se derivó del salt del almacenamiento anterior;
         # contra el nuevo no descifra nada. Bloquear obliga a escribir la
