@@ -514,3 +514,34 @@ def test_vincular_no_escribe_nada_si_el_backend_no_esta_en_la_lista(cliente):
 
     assert r.status_code == 400
     assert vinculacion.leer(cfg) is None
+
+
+def test_el_handshake_dice_que_version_corre(cliente):
+    """Sin esto no hay forma de saber si el .exe en uso trae un arreglo.
+
+    Costo una tarde: se probaba un arreglo contra un binario anterior a el, y
+    nada en la interfaz lo delataba.
+    """
+    from sunat import __version__
+
+    datos = cliente.get("/api/handshake", headers=CABECERAS).json()
+    assert datos["version"] == __version__
+
+
+def test_la_version_del_paquete_y_la_de_pyproject_no_pueden_discrepar():
+    """Llegaron a decir 0.1.0 y 1.0.0 con los tags en v1.3.0."""
+    import pathlib
+    import re
+
+    from sunat import __version__
+
+    pyproject = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+
+    # Con `dynamic`, pyproject no repite el numero: lo lee del paquete. Que no
+    # haya un `version = "..."` fijo ES la comprobacion.
+    assert 'dynamic = ["version"]' in pyproject
+    assert 'attr = "sunat.__version__"' in pyproject
+    assert not re.search(r'^version\s*=\s*"', pyproject, re.MULTILINE)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)

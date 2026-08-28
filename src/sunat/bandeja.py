@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from PIL import Image, ImageDraw
 import pystray
 
+from . import __version__
 from .config import Config
 from .log import obtener
 
@@ -87,6 +88,6 @@ def ejecutar(cfg: Config, servidor: "uvicorn.Server") -> None:
     )
 
     icono = pystray.Icon(
-        "sunat-agente", _icono(), "SUNAT Launcher — agente", menu
+        "sunat-agente", _icono(), f"SUNAT Launcher — agente v{__version__}", menu
     )
     icono.run()  # bloquea hasta "Salir"

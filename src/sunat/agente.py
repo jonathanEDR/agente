@@ -35,6 +35,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import plataformas, vinculacion
+from . import __version__
 from .config import Config, cargar_config, crear_repositorio, limpiar_perfiles_viejos
 from .errors import SunatError
 from .log import configurar, obtener
@@ -300,6 +301,9 @@ def crear_app(cfg: Config, token: str, puerto: int) -> FastAPI:
         vinculo = vinculacion.leer(cfg)
         return {
             "agente": "sunat-launcher",
+            # Que version corre. Sin esto no hay forma de saber, desde el
+            # panel, si el .exe en uso trae un arreglo o es de antes.
+            "version": __version__,
             "token": token,
             "vinculado": vinculo is not None,
             "api_url": vinculo.api_url if vinculo else "",

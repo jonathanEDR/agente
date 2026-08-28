@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sunat-launcher-agent"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Agente local del SaaS: cifra, descifra y abre Chrome en SUNAT SOL."
 requires-python = ">=3.11"
 dependencies = [
@@ -22,6 +22,9 @@ build = ["pyinstaller>=6.10"]
 
 [project.scripts]
 sunat-agente = "sunat.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "sunat.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
