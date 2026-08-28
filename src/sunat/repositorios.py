@@ -217,11 +217,26 @@ class RepositorioApi:
                 detalle = json.loads(e.read().decode("utf-8")).get("error", "")
             except Exception:  # noqa: BLE001 - el cuerpo del error es opcional
                 pass
-            if e.code in (401, 403):
+            # 401 y 403 NO son lo mismo, aunque durante un tiempo se
+            # trataran igual aquí.
+            #
+            # 401 es "no sé quién eres": el token fue revocado y hay que
+            # volver a vincular. 403 es "sé quién eres y esto no te toca", y
+            # el backend lo usa para cosas perfectamente normales — el límite
+            # de empresas del plan, o un agente intentando vincular otro
+            # agente. Confundirlos hacía que quedarse sin cupo apareciera en
+            # pantalla como "el backend rechazó el token de esta computadora",
+            # y el panel llegara a mostrar el equipo como revocado.
+            if e.code == 401:
                 raise TokenRechazado(
                     "El backend rechazó el token de esta computadora. Puede "
                     "haber sido revocado desde el panel: vuelve a vincularla."
                 ) from e
+
+            if e.code == 403:
+                # El mensaje del backend ya explica qué pasó y qué hacer;
+                # envolverlo en uno propio solo lo escondería.
+                raise ErrorApi(detalle or "El backend no permitió la operación.") from e
             raise ErrorApi(f"La API respondió {e.code}. {detalle}".strip()) from e
         except urllib.error.URLError as e:
             raise ErrorApi(

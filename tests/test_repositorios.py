@@ -341,3 +341,62 @@ def test_una_boveda_vieja_se_detecta_como_debil(tmp_path):
     repo.crear(params, caja.cifrar("sunat-launcher-vault-v1"))
 
     assert Vault.abrir(repo, "mi gato duerme sobre el teclado").kdf_debil is True
+
+
+# --- 401 no es lo mismo que 403 ---------------------------------------------
+
+
+class _ErrorHttpFalso(Exception):
+    """Lo minimo de urllib.error.HTTPError que usa `_pedir`."""
+
+    def __init__(self, code, cuerpo):
+        self.code = code
+        self._cuerpo = json.dumps(cuerpo).encode("utf-8")
+
+    def read(self):
+        return self._cuerpo
+
+
+def _api_que_responde(monkeypatch, code, cuerpo):
+    import urllib.error
+    import urllib.request
+
+    from sunat.repositorios import RepositorioApi
+
+    monkeypatch.setattr(urllib.error, "HTTPError", _ErrorHttpFalso, raising=False)
+
+    def urlopen_falso(*_a, **_kw):
+        raise _ErrorHttpFalso(code, cuerpo)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen_falso)
+    return RepositorioApi("https://api.ejemplo.com", "sla_" + "a" * 64)
+
+
+def test_un_401_significa_token_revocado(monkeypatch):
+    from sunat.repositorios import TokenRechazado
+
+    api = _api_que_responde(monkeypatch, 401, {"error": "No autorizado."})
+
+    with pytest.raises(TokenRechazado):
+        api.existe()
+
+
+def test_un_403_no_es_un_token_revocado(monkeypatch):
+    """El limite del plan llega como 403, y el usuario tiene que leerlo.
+
+    Cuando los dos codigos se trataban igual, quedarse sin cupo aparecia en
+    pantalla como "el backend rechazo el token de esta computadora" y el panel
+    llegaba a mostrar el equipo como revocado. Dos problemas distintos con la
+    misma cara, y el consejo equivocado para uno de los dos.
+    """
+    from sunat.repositorios import ErrorApi, TokenRechazado
+
+    limite = "Tu plan Free permite hasta 4 empresas y ya tienes 4."
+    api = _api_que_responde(monkeypatch, 403, {"error": limite})
+
+    with pytest.raises(ErrorApi) as capturado:
+        api.existe()
+
+    assert not isinstance(capturado.value, TokenRechazado)
+    # El mensaje del backend llega intacto: es el que explica que hacer.
+    assert str(capturado.value) == limite
